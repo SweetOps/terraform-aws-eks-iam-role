@@ -1,5 +1,6 @@
 locals {
-  enabled = module.this.enabled
+  enabled            = module.this.enabled
+  iam_policy_enabled = local.enabled && var.managed_iam_policy_enabled
 
   eks_cluster_oidc_issuer = replace(var.eks_cluster_oidc_issuer_url, "https://", "")
 
@@ -45,15 +46,16 @@ module "service_account_label" {
 }
 
 resource "aws_iam_role" "service_account" {
-  for_each           = toset(compact([module.service_account_label.id]))
-  name               = each.value
+  count = local.enabled ? 1 : 0
+
+  name               = module.service_account_label.id
   description        = format("Role assumed by EKS ServiceAccount %s", local.service_account_id)
-  assume_role_policy = data.aws_iam_policy_document.service_account_assume_role[each.value].json
+  assume_role_policy = one(data.aws_iam_policy_document.service_account_assume_role[*].json)
   tags               = module.service_account_label.tags
 }
 
 data "aws_iam_policy_document" "service_account_assume_role" {
-  for_each = toset(compact([module.service_account_label.id]))
+  count = local.enabled ? 1 : 0
 
   statement {
     actions = [
@@ -76,14 +78,16 @@ data "aws_iam_policy_document" "service_account_assume_role" {
 }
 
 resource "aws_iam_policy" "service_account" {
-  for_each    = var.aws_iam_policy_document != null ? toset(compact([module.service_account_label.id])) : []
-  name        = each.value
+  count = local.iam_policy_enabled ? 1 : 0
+
+  name        = module.service_account_label.id
   description = format("Grant permissions to EKS ServiceAccount %s", local.service_account_id)
-  policy      = coalesce(var.aws_iam_policy_document, "{}")
+  policy      = var.aws_iam_policy_document
 }
 
 resource "aws_iam_role_policy_attachment" "service_account" {
-  for_each   = var.aws_iam_policy_document != null ? toset(compact([module.service_account_label.id])) : []
-  role       = aws_iam_role.service_account[each.value].name
-  policy_arn = aws_iam_policy.service_account[each.value].arn
+  count = local.iam_policy_enabled ? 1 : 0
+
+  role       = one(aws_iam_role.service_account[*].name)
+  policy_arn = one(aws_iam_policy.service_account[*].arn)
 }
